@@ -13,19 +13,6 @@ def positional_encoding(seq_len, d_model):
   return torch.cat((sin, cos), -1).reshape(d_model, seq_len).transpose(0, 1)
 
 
-def SGDR(max_lr, min_lr, warmup, steps_max):
-  def schedule(steps):
-    if steps < warmup:
-      return (steps + 1) * max_lr / warmup
-    steps -= warmup
-    if steps // steps_max % 2 == 0:
-      scale = 0.5 + cos(pi * steps / steps_max) / 2
-    else:
-      scale = 0.5 - cos(pi * steps / steps_max) / 2
-    return min_lr + (max_lr - min_lr) * scale
-  return schedule
-
-
 class Layer(nn.Module):
   def __init__(self, d_model, n_head, ffn_p, attn_p, eps):
     super().__init__()
