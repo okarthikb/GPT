@@ -124,6 +124,11 @@ class GPT(nn.Module):
   def predict(self, ids, temp=1):
     x, scores = self(ids)
     return F.softmax(self.linear(x) / (temp + 1e-5), -1), scores
+  
+  def loss(self, inp, tgt):
+    return F.cross_entropy(
+      model.predict(inp)[0].reshape(-1, self.vocab), tgt.reshape(-1)   
+    )
 
   # beam search
   def complete(self, ids, n_token=-1, k=1, temp=1, alpha=0.4, eos_id=2):
@@ -148,91 +153,3 @@ class GPT(nn.Module):
       log_probs /= torch.tensor([len(beam) for beam in beams]) ** alpha
 
       return beams[torch.argmax(log_probs)]
-
-
-class Scheduler:
-  def __init__(self, opt, schedule=lambda _ : 2e-4):
-    self.param_groups = opt.param_groups
-    self.schedule = schedule
-    self.steps = 0
-    self.lr = None
-
-  def step(self):
-    self.lr = self.schedule(self.steps)
-    for group in self.param_groups:
-      group['lr'] = self.lr
-    self.steps += 1
-
-
-class Trainer:
-  def __init__(
-    self, model, loader, opt, loss_fn, schedule, epochs, project=None, log=64
-  ):
-    self.model, self.loader, self.loss_fn = model, loader, loss_fn
-    self.opt = opt(model.parameters())
-    self.scheduler = Scheduler(self.opt, schedule)
-    self.epochs = epochs
-    self.project = project
-    self.log = log
-
-  def state(self, epoch):
-    return {
-      'model': self.model.state_dict(),
-      'opt': self.opt.state_dict(),
-      'steps': self.scheduler.steps,
-      'epoch': epoch
-    }
-
-  def train(self, accum_mod=1, ckpt_mod=1, load_dir=None, verbose=True):
-    print('training start')
-
-    if self.project is not None:
-      wandb.init(project=self.project, config={'epochs': self.epochs})
-      wandb.watch(self.model, log_freq=self.log)
-      print('initialized wandb project')
-
-    last_epoch = 0
-    if load_dir is not None:
-      state = torch.load(load_dir)
-      self.model.load_state_dict(state['model'])
-      self.opt.load_state_dict(state['opt'])
-      self.scheduler.step = state['steps']
-      last_epoch = state['epoch']
-      print('checkpoint loaded')
-
-    losses = []
-    for epoch in range(1, self.epochs + 1):
-      cur_epoch = last_epoch + epoch
-      for i, data in enumerate(self.loader(), 1):
-        loss = self.loss_fn(self.model, *data)
-        loss.backward()
-        losses.append(loss.item())
-        # accumulate gradient over batches
-        if i % accum_mod == 0:
-          self.scheduler.step()
-          self.opt.step()
-          self.opt.zero_grad()
-          if self.project is not None:
-            wandb.log(
-              {'loss': sum(losses[-accum_mod:]), 'lr': self.scheduler.lr}
-            )
-
-      print(
-        f'epoch: {cur_epoch}/{last_epoch + self.epochs}\t\
-          loss: {sum(losses[-len(self.loader):]) / len(self.loader)}'
-      )
-
-      yield self.state(cur_epoch)
-
-
-class Loader:
-  def __init__(self, data, batch_size, process):
-    self.data, self.batch_size, self.process = data, batch_size, process
-
-  def __call__(self):
-    random.shuffle(self.data)
-    for i in range(0, len(self.data), self.batch_size):
-      yield self.process(self.data[i:i + self.batch_size])
-
-  def __len__(self):
-    return len(self.data) // self.batch_size
