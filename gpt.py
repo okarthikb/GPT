@@ -157,9 +157,6 @@ class Scheduler:
     self.steps = 0
     self.lr = None
 
-  def zero_grad(self):
-    self.opt.zero_grad()
-
   def step(self):
     self.lr = self.schedule(self.steps)
     for group in self.param_groups:
