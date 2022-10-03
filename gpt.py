@@ -7,18 +7,13 @@ class Layer(nn.Module):
   def __init__(self, d_model, n_head, ffn_p, attn_p, eps):
     super().__init__()
     assert d_model % n_head == 0, 'n_head should divide d_model'
-
     self.d_model, self.n_head = d_model, n_head
     self.d_head = d_model // n_head
-
     self.ffn_drop, self.attn_drop = nn.Dropout(ffn_p), nn.Dropout(attn_p)
-
     self.ln1 = nn.LayerNorm(d_model, eps)
     self.ln2 = nn.LayerNorm(d_model, eps)
-
     self.Wx = nn.Linear(d_model, 3 * d_model)  # Wq, Wk, and Wv combined
     self.Wo = nn.Linear(d_model, d_model)
-
     self.ffn = nn.Sequential(
       nn.Linear(d_model, 4 * d_model),
       nn.GELU(),
@@ -45,42 +40,30 @@ class Layer(nn.Module):
 
 class GPT(nn.Module):
   def __init__(
-    self,
-    d_model,
-    n_head,
-    n_layer,
-    seq_len,
-    ffn_p,
-    attn_p,
-    emb_p,
-    eps,
-    vocab
+    self, d_model, n_head, n_layer, seq_len, ffn_p, attn_p, emb_p, vocab
   ):
     super().__init__()
     self.seq_len = seq_len
     self.d_model, self.vocab = d_model, vocab 
     self.n_layer, self.n_head = n_layer, n_head 
     self.ffn_p, self.attn_p, self.emb_p = ffn_p, attn_p, emb_p
-    self.eps = eps
-
+    # word embeddings
     self.emb = nn.Embedding(vocab, d_model)
     self.emb_drop = nn.Dropout(emb_p)
-
+    # positional encoding
     pe = torch.empty(self.seq_len, self.d_model)
     nn.init.normal_(pe, 0, 0.02)
     self.pe = nn.Parameter(pe, requires_grad=learn_pe)
-
+    # decoder mask
     mask = torch.tril(torch.ones(seq_len, seq_len)) - 1
     mask[mask == -1] = float('-inf')
     self.mask = nn.Parameter(mask, requires_grad=False)
-
+    # decoder layers
     self.layers = nn.ModuleList(
       [Layer(d_model, n_head, ffn_p, attn_p, eps) for _ in range(n_layer)]
     )
-
+    # linear projection from output embeddings to token probabilities
     self.linear = nn.Linear(d_model, vocab)
-
-    self.n_param = sum(p.numel() for p in self.parameters())
 
   def forward(self, ids):
     inp_len = ids.shape[-1]
@@ -106,10 +89,8 @@ class GPT(nn.Module):
   def complete(self, ids, n_token=-1, k=1, temp=1, alpha=0.4, eos_id=2):
     assert len(ids.shape) == 1, 'batched inputs not allowed'
     assert len(ids) < self.seq_len, 'input sequence too long'
-
     if n_token == -1 or len(ids) + n_token > self.seq_len:
       n_token = self.seq_len - len(ids)
-
     with torch.no_grad():
       topk_probs, topk_ids = torch.topk(self.predict(ids, temp)[0][-1], k)
       log_probs = torch.log(topk_probs)
@@ -123,5 +104,5 @@ class GPT(nn.Module):
           log_probs[i] += torch.log(probs[next_id[0]])
           beams[i] = torch.cat((beams[i], next_id))
       log_probs /= torch.tensor([len(beam) for beam in beams]) ** alpha
-
+      # return sequence with max probability
       return beams[torch.argmax(log_probs)]
