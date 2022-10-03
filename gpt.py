@@ -1,16 +1,6 @@
-import random, pickle, torch, wandb
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from math import sqrt, cos, pi
-
-
-def positional_encoding(seq_len, d_model):
-  assert d_model % 2 == 0, 'd_model should be even'
-  freq = 0.0001 ** (2 * (torch.arange(2, d_model + 2) // 2) / d_model)
-  pos = torch.arange(seq_len).repeat(d_model, 1)
-  sin = torch.sin(freq[::2, None] * pos[::2])
-  cos = torch.cos(freq[1::2, None] * pos[1::2])
-  return torch.cat((sin, cos), -1).reshape(d_model, seq_len).transpose(0, 1)
 
 
 class Layer(nn.Module):
@@ -64,25 +54,20 @@ class GPT(nn.Module):
     attn_p,
     emb_p,
     eps,
-    vocab,
-    learn_pe
+    vocab
   ):
     super().__init__()
     self.seq_len = seq_len
     self.d_model, self.vocab = d_model, vocab 
     self.n_layer, self.n_head = n_layer, n_head 
-    self.ffn_p, self.attn_p, self.emb_p = ffn_p, attn_p, emb_p 
-    self.learn_pe = learn_pe
+    self.ffn_p, self.attn_p, self.emb_p = ffn_p, attn_p, emb_p
     self.eps = eps
 
     self.emb = nn.Embedding(vocab, d_model)
     self.emb_drop = nn.Dropout(emb_p)
 
-    if learn_pe:
-      pe = torch.empty(self.seq_len, self.d_model)
-      nn.init.normal_(pe, 0, 0.02)
-    else:
-      pe = positional_encoding(seq_len, d_model)
+    pe = torch.empty(self.seq_len, self.d_model)
+    nn.init.normal_(pe, 0, 0.02)
     self.pe = nn.Parameter(pe, requires_grad=learn_pe)
 
     mask = torch.tril(torch.ones(seq_len, seq_len)) - 1
