@@ -74,11 +74,7 @@ class GPT(nn.Module):
     for layer in self.layers:
       x, score = layer(x, mask)
       scores.append(score.squeeze(0))
-    return x.squeeze(0), scores
-
-  def predict(self, ids):
-    x, scores = self(ids)
-    return self.linear(x), scores
+    return self.linear(x.squeeze(0)), scores
 
   def loss(self, inp, tgt):
     return F.cross_entropy(
@@ -94,7 +90,7 @@ class GPT(nn.Module):
       n_token = self.seq_len - len(ids)
     with torch.no_grad():
       topk_probs, topk_ids = torch.topk(
-        F.softmax(self.predict(ids)[0] / temp, -1)[-1], k
+        F.softmax(self(ids)[0] / temp, -1)[-1], k
       )
       log_probs = torch.log(topk_probs)
       beams = list(torch.cat((ids.repeat(k, 1), topk_ids[:, None]), -1))
@@ -102,7 +98,7 @@ class GPT(nn.Module):
         for _ in range(n_token - 1):
           if beams[i][-1].item() == eos_id:
             break
-          probs = F.softmax(self.predict(beams[i])[0] / temp, -1)[-1]
+          probs = F.softmax(self(beams[i])[0] / temp, -1)[-1]
           next_id = torch.multinomial(probs, 1)
           log_probs[i] += torch.log(probs[next_id[0]])
           beams[i] = torch.cat((beams[i], next_id))
