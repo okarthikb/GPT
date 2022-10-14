@@ -40,12 +40,12 @@ class Layer(nn.Module):
 
 class GPT(nn.Module):
   def __init__(
-    self, d_model, n_head, n_layer, seq_len, ffn_p, attn_p, emb_p, vocab
+    self, d_model, n_head, n_layer, seq_len, eps, ffn_p, attn_p, emb_p, vocab
   ):
     super().__init__()
     self.seq_len = seq_len
-    self.d_model, self.vocab = d_model, vocab 
-    self.n_layer, self.n_head = n_layer, n_head 
+    self.d_model, self.vocab = d_model, vocab
+    self.n_layer, self.n_head = n_layer, n_head
     self.ffn_p, self.attn_p, self.emb_p = ffn_p, attn_p, emb_p
     # word embeddings
     self.emb = nn.Embedding(vocab, d_model)
@@ -53,7 +53,7 @@ class GPT(nn.Module):
     # positional encoding
     pe = torch.empty(self.seq_len, self.d_model)
     nn.init.normal_(pe, 0, 0.02)
-    self.pe = nn.Parameter(pe, requires_grad=learn_pe)
+    self.pe = nn.Parameter(pe)
     # decoder mask
     mask = torch.tril(torch.ones(seq_len, seq_len)) - 1
     mask[mask == -1] = float('-inf')
@@ -76,30 +76,33 @@ class GPT(nn.Module):
       scores.append(score.squeeze(0))
     return x.squeeze(0), scores
 
-  def predict(self, ids, temp=1):
+  def predict(self, ids):
     x, scores = self(ids)
-    return F.softmax(self.linear(x) / (temp + 1e-5), -1), scores
-  
+    return self.linear(x), scores
+
   def loss(self, inp, tgt):
     return F.cross_entropy(
-      model.predict(inp)[0].reshape(-1, self.vocab), tgt.reshape(-1)   
+      self.predict(inp)[0].reshape(-1, self.vocab), tgt.reshape(-1)
     )
 
   # beam search
   def complete(self, ids, n_token=-1, k=1, temp=1, alpha=0.4, eos_id=2):
+    assert temp > 0, 'temperature should be greater than 0'
     assert len(ids.shape) == 1, 'batched inputs not allowed'
     assert len(ids) < self.seq_len, 'input sequence too long'
     if n_token == -1 or len(ids) + n_token > self.seq_len:
       n_token = self.seq_len - len(ids)
     with torch.no_grad():
-      topk_probs, topk_ids = torch.topk(self.predict(ids, temp)[0][-1], k)
+      topk_probs, topk_ids = torch.topk(
+        F.softmax(self.predict(ids)[0] / temp, -1)[-1], k
+      )
       log_probs = torch.log(topk_probs)
       beams = list(torch.cat((ids.repeat(k, 1), topk_ids[:, None]), -1))
       for i in range(k):
         for _ in range(n_token - 1):
           if beams[i][-1].item() == eos_id:
             break
-          probs = self.predict(beams[i], temp)[0][-1]
+          probs = F.softmax(self.predict(beams[i])[0] / temp, -1)[-1]
           next_id = torch.multinomial(probs, 1)
           log_probs[i] += torch.log(probs[next_id[0]])
           beams[i] = torch.cat((beams[i], next_id))
