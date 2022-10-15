@@ -78,7 +78,7 @@ class GPT(nn.Module):
 
   def loss(self, inp, tgt):
     return F.cross_entropy(
-      self.predict(inp)[0].reshape(-1, self.vocab), tgt.reshape(-1)
+      self(inp)[0].reshape(-1, self.vocab), tgt.reshape(-1)
     )
 
   # beam search
